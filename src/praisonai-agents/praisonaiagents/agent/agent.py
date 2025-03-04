@@ -25,6 +25,7 @@ from dataclasses import dataclass
 if TYPE_CHECKING:
     from ..task.task import Task
 
+
 @dataclass
 class ChatCompletionMessage:
     content: str
@@ -35,12 +36,14 @@ class ChatCompletionMessage:
     tool_calls: Optional[List] = None
     reasoning_content: Optional[str] = None
 
+
 @dataclass
 class Choice:
     finish_reason: Optional[str]
     index: int
     message: ChatCompletionMessage
     logprobs: Optional[dict] = None
+
 
 @dataclass
 class CompletionTokensDetails:
@@ -49,10 +52,12 @@ class CompletionTokensDetails:
     reasoning_tokens: Optional[int] = None
     rejected_prediction_tokens: Optional[int] = None
 
+
 @dataclass
 class PromptTokensDetails:
     audio_tokens: Optional[int] = None
     cached_tokens: int = 0
+
 
 @dataclass
 class CompletionUsage:
@@ -63,6 +68,7 @@ class CompletionUsage:
     prompt_tokens_details: Optional[PromptTokensDetails] = None
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
+
 
 @dataclass
 class ChatCompletion:
@@ -75,25 +81,26 @@ class ChatCompletion:
     service_tier: Optional[str] = None
     usage: Optional[CompletionUsage] = None
 
+
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
     if not chunks:
         return None
-    
+
     try:
         first_chunk = chunks[0]
         last_chunk = chunks[-1]
-        
+
         # Basic metadata
-        id = getattr(first_chunk, "id", None) 
+        id = getattr(first_chunk, "id", None)
         created = getattr(first_chunk, "created", None)
         model = getattr(first_chunk, "model", None)
         system_fingerprint = getattr(first_chunk, "system_fingerprint", None)
-        
+
         # Track usage
         completion_tokens = 0
         prompt_tokens = 0
-        
+
         content_list = []
         reasoning_list = []
         tool_calls = []
@@ -103,7 +110,7 @@ def process_stream_chunks(chunks):
         for chunk in chunks:
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
-            
+
             delta = getattr(chunk.choices[0], "delta", None)
             if not delta:
                 continue
@@ -113,7 +120,7 @@ def process_stream_chunks(chunks):
                 content_list.append(delta.content)
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 reasoning_list.append(delta.reasoning_content)
-            
+
             # Handle tool calls
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 for tool_call_delta in delta.tool_calls:
@@ -136,11 +143,14 @@ def process_stream_chunks(chunks):
                             current_tool_call["function"]["arguments"] += tool_call_delta.function.arguments
 
         # Remove any None values and empty tool calls
-        tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
+        tool_calls = [tc for tc in tool_calls if tc and tc["id"]
+                      and tc["function"]["name"]]
 
         combined_content = "".join(content_list) if content_list else ""
-        combined_reasoning = "".join(reasoning_list) if reasoning_list else None
-        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
+        combined_reasoning = "".join(
+            reasoning_list) if reasoning_list else None
+        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(
+            last_chunk, "choices") and last_chunk.choices else None
 
         # Create ToolCall objects
         processed_tool_calls = []
@@ -166,7 +176,7 @@ def process_stream_chunks(chunks):
             reasoning_content=combined_reasoning,
             tool_calls=processed_tool_calls if processed_tool_calls else None
         )
-        
+
         choice = Choice(
             finish_reason=finish_reason or "tool_calls" if processed_tool_calls else None,
             index=0,
@@ -180,7 +190,7 @@ def process_stream_chunks(chunks):
             completion_tokens_details=CompletionTokensDetails(),
             prompt_tokens_details=PromptTokensDetails()
         )
-        
+
         return ChatCompletion(
             id=id,
             choices=[choice],
@@ -189,28 +199,32 @@ def process_stream_chunks(chunks):
             system_fingerprint=system_fingerprint,
             usage=usage
         )
-        
+
     except Exception as e:
         print(f"Error processing chunks: {e}")
         return None
+
 
 class Agent:
     def _generate_tool_definition(self, function_name):
         """
         Generate a tool definition from a function name by inspecting the function.
         """
-        logging.debug(f"Attempting to generate tool definition for: {function_name}")
-        
+        logging.debug(
+            f"Attempting to generate tool definition for: {function_name}")
+
         # First try to get the tool definition if it exists
         tool_def_name = f"{function_name}_definition"
         tool_def = globals().get(tool_def_name)
-        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-        
+        logging.debug(
+            f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+
         if not tool_def:
             import __main__
             tool_def = getattr(__main__, tool_def_name, None)
-            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-        
+            logging.debug(
+                f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+
         if tool_def:
             logging.debug(f"Found tool definition: {tool_def}")
             return tool_def
@@ -221,21 +235,25 @@ class Agent:
             if callable(tool) and getattr(tool, '__name__', '') == function_name:
                 func = tool
                 break
-        
-        logging.debug(f"Looking for {function_name} in agent tools: {func is not None}")
-        
+
+        logging.debug(
+            f"Looking for {function_name} in agent tools: {func is not None}")
+
         # If not found in tools, try globals and main
         if not func:
             func = globals().get(function_name)
-            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
+            logging.debug(
+                f"Looking for {function_name} in globals: {func is not None}")
+
             if not func:
                 import __main__
                 func = getattr(__main__, function_name, None)
-                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+                logging.debug(
+                    f"Looking for {function_name} in __main__: {func is not None}")
 
         if not func or not callable(func):
-            logging.debug(f"Function {function_name} not found or not callable")
+            logging.debug(
+                f"Function {function_name} not found or not callable")
             return None
 
         import inspect
@@ -252,7 +270,7 @@ class Agent:
 
         sig = inspect.signature(func)
         logging.debug(f"Function signature: {sig}")
-        
+
         # Skip self, *args, **kwargs, so they don't get passed in arguments
         parameters_list = []
         for name, param in sig.parameters.items():
@@ -267,11 +285,11 @@ class Agent:
             "properties": {},
             "required": []
         }
-        
+
         # Parse docstring for parameter descriptions
         docstring = inspect.getdoc(func)
         logging.debug(f"Function docstring: {docstring}")
-        
+
         param_descriptions = {}
         if docstring:
             import re
@@ -283,8 +301,9 @@ class Agent:
                     line = line.strip()
                     if line and ':' in line:
                         param_name, param_desc = line.split(':', 1)
-                        param_descriptions[param_name.strip()] = param_desc.strip()
-        
+                        param_descriptions[param_name.strip()
+                                           ] = param_desc.strip()
+
         logging.debug(f"Parameter descriptions: {param_descriptions}")
 
         for name, param in parameters_list:
@@ -300,20 +319,21 @@ class Agent:
                     param_type = "array"
                 elif param.annotation == dict:
                     param_type = "object"
-            
+
             param_info = {"type": param_type}
             if name in param_descriptions:
                 param_info["description"] = param_descriptions[name]
-            
+
             parameters["properties"][name] = param_info
             if param.default == inspect.Parameter.empty:
                 parameters["required"].append(name)
-        
+
         logging.debug(f"Generated parameters: {parameters}")
 
         # Extract description from docstring
-        description = docstring.split('\n')[0] if docstring else f"Function {function_name}"
-        
+        description = docstring.split(
+            '\n')[0] if docstring else f"Function {function_name}"
+
         tool_def = {
             "type": "function",
             "function": {
@@ -375,7 +395,8 @@ class Agent:
 
         # Handle backward compatibility for required fields
         if all(x is None for x in [name, role, goal, backstory, instructions]):
-            raise ValueError("At least one of name, role, goal, backstory, or instructions must be provided")
+            raise ValueError(
+                "At least one of name, role, goal, backstory, or instructions must be provided")
 
         # Configure logging to suppress unwanted outputs
         logging.getLogger("litellm").setLevel(logging.WARNING)
@@ -398,7 +419,7 @@ class Agent:
             self.backstory = backstory or "I am an AI assistant"
             # Default to True for traditional agents if not specified
             self.self_reflect = True if self_reflect is None else self_reflect
-        
+
         self.instructions = instructions
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
@@ -454,9 +475,10 @@ class Agent:
         self.max_reflect = max_reflect
         self.min_reflect = min_reflect
         # Use the same model selection logic for reflect_llm
-        self.reflect_llm = reflect_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o')
+        self.reflect_llm = reflect_llm or os.getenv(
+            'OPENAI_MODEL_NAME', 'gpt-4o')
         self.console = Console()  # Create a single console instance for the agent
-        
+
         # Initialize system prompt
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
@@ -477,7 +499,7 @@ Your Goal: {self.goal}
             # Initialize Knowledge with provided or default config
             from praisonaiagents.knowledge import Knowledge
             self.knowledge = Knowledge(knowledge_config or None)
-            
+
             # Handle knowledge
             if knowledge:
                 for source in knowledge:
@@ -488,23 +510,26 @@ Your Goal: {self.goal}
         try:
             if os.path.exists(knowledge_item):
                 # It's a file path
-                self.knowledge.add(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
+                self.knowledge.add(
+                    knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
             elif knowledge_item.startswith("http://") or knowledge_item.startswith("https://"):
                 # It's a URL
                 pass
             else:
                 # It's a string content
-                self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
+                self.knowledge.store(
+                    knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
         except Exception as e:
-            logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
+            logging.error(
+                f"Error processing knowledge item: {knowledge_item}, error: {e}")
 
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
         from ..task.task import Task
-        
+
         description = self.instructions if self.instructions else f"Execute task as {self.role} with goal: {self.goal}"
         expected_output = "Complete the assigned task successfully"
-        
+
         return Task(
             name=self.name,
             description=description,
@@ -517,7 +542,8 @@ Your Goal: {self.goal}
         """
         Execute a tool dynamically based on the function name and arguments.
         """
-        logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+        logging.debug(
+            f"{self.name} executing tool {function_name} with arguments: {arguments}")
 
         # Try to find the function in the agent's tools list first
         func = None
@@ -526,7 +552,7 @@ Your Goal: {self.goal}
                (inspect.isclass(tool) and tool.__name__ == function_name):
                 func = tool
                 break
-        
+
         if func is None:
             # If not found in tools, try globals and main
             func = globals().get(function_name)
@@ -539,16 +565,16 @@ Your Goal: {self.goal}
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
                     instance = func()
-                    run_params = {k: v for k, v in arguments.items() 
-                                  if k in inspect.signature(instance.run).parameters 
+                    run_params = {k: v for k, v in arguments.items()
+                                  if k in inspect.signature(instance.run).parameters
                                   and k != 'self'}
                     return instance.run(**run_params)
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
                     instance = func()
-                    run_params = {k: v for k, v in arguments.items() 
-                                  if k in inspect.signature(instance._run).parameters 
+                    run_params = {k: v for k, v in arguments.items()
+                                  if k in inspect.signature(instance._run).parameters
                                   and k != 'self'}
                     return instance._run(**run_params)
 
@@ -557,9 +583,10 @@ Your Goal: {self.goal}
                     return func(**arguments)
             except Exception as e:
                 error_msg = str(e)
-                logging.error(f"Error executing tool {function_name}: {error_msg}")
+                logging.error(
+                    f"Error executing tool {function_name}: {error_msg}")
                 return {"error": error_msg}
-        
+
         error_msg = f"Tool '{function_name}' is not callable"
         logging.error(error_msg)
         return {"error": error_msg}
@@ -581,11 +608,11 @@ Your Goal: {self.goal}
                 tools=formatted_tools if formatted_tools else None,
                 stream=True
             )
-            
+
             full_response_text = ""
             reasoning_content = ""
             chunks = []
-            
+
             # Create Live display with proper configuration
             with Live(
                 display_generating("", start_time),
@@ -597,22 +624,38 @@ Your Goal: {self.goal}
             ) as live:
                 for chunk in response_stream:
                     chunks.append(chunk)
+
+                    reasoning = False
                     if chunk.choices[0].delta.content:
-                        full_response_text += chunk.choices[0].delta.content
-                        live.update(display_generating(full_response_text, start_time))
-                    
+                        if chunk.choices[0].delta.content == "<think>":
+                            reasoning = True
+                            continue
+                        if chunk.choices[0].delta.content == "</think>":
+                            reasoning = False
+                            continue
+
+                        if reasoning_steps and reasoning:
+                            reasoning_content += chunk.choices[0].delta.content
+                            live.update(display_generating(
+                                f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                        else:
+                            full_response_text += chunk.choices[0].delta.content
+                            live.update(display_generating(
+                                full_response_text, start_time))
+
                     # Update live display with reasoning content if enabled
                     if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
                         rc = chunk.choices[0].delta.reasoning_content
                         if rc:
                             reasoning_content += rc
-                            live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-            
+                            live.update(display_generating(
+                                f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+
             # Clear the last generating display with a blank line
             self.console.print()
             final_response = process_stream_chunks(chunks)
             return final_response
-            
+
         except Exception as e:
             display_error(f"Error in stream processing: {e}")
             return None
@@ -632,13 +675,15 @@ Your Goal: {self.goal}
                     if tool_def:
                         formatted_tools.append(tool_def)
                     else:
-                        logging.warning(f"Could not generate definition for tool: {tool}")
+                        logging.warning(
+                            f"Could not generate definition for tool: {tool}")
                 elif isinstance(tool, dict):
                     formatted_tools.append(tool)
                 elif hasattr(tool, "to_openai_tool"):
                     formatted_tools.append(tool.to_openai_tool())
                 elif callable(tool):
-                    formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                    formatted_tools.append(
+                        self._generate_tool_definition(tool.__name__))
                 else:
                     logging.warning(f"Tool {tool} not recognized")
 
@@ -646,9 +691,9 @@ Your Goal: {self.goal}
             if stream:
                 # Process as streaming response with formatted tools
                 final_response = self._process_stream_response(
-                    messages, 
-                    temperature, 
-                    start_time, 
+                    messages,
+                    temperature,
+                    start_time,
                     formatted_tools=formatted_tools if formatted_tools else None,
                     reasoning_steps=reasoning_steps
                 )
@@ -662,11 +707,12 @@ Your Goal: {self.goal}
                     stream=False
                 )
 
-            tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
+            tool_calls = getattr(
+                final_response.choices[0].message, 'tool_calls', None)
 
             if tool_calls:
                 messages.append({
-                    "role": "assistant", 
+                    "role": "assistant",
                     "content": final_response.choices[0].message.content,
                     "tool_calls": tool_calls
                 })
@@ -676,13 +722,16 @@ Your Goal: {self.goal}
                     arguments = json.loads(tool_call.function.arguments)
 
                     if self.verbose:
-                        display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
+                        display_tool_call(
+                            f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}")
 
                     tool_result = self.execute_tool(function_name, arguments)
-                    results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                    results_str = json.dumps(
+                        tool_result) if tool_result else "Function returned an empty output"
 
                     if self.verbose:
-                        display_tool_call(f"Function '{function_name}' returned: {results_str}")
+                        display_tool_call(
+                            f"Function '{function_name}' returned: {results_str}")
 
                     messages.append({
                         "role": "tool",
@@ -693,8 +742,8 @@ Your Goal: {self.goal}
                 # Get final response after tool calls
                 if stream:
                     final_response = self._process_stream_response(
-                        messages, 
-                        temperature, 
+                        messages,
+                        temperature,
                         start_time,
                         formatted_tools=formatted_tools if formatted_tools else None,
                         reasoning_steps=reasoning_steps
@@ -727,22 +776,25 @@ Your Goal: {self.goal}
                 "agent_role": self.role,
                 "agent_goal": self.goal
             }
-            logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
-        
+            logging.debug(
+                f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
+
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         # Search for existing knowledge if any knowledge is provided
         if self.knowledge:
-            search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+            search_results = self.knowledge.search(
+                prompt, agent_id=self.agent_id)
             if search_results:
                 # Check if search_results is a list of dictionaries or strings
                 if isinstance(search_results, dict) and 'results' in search_results:
                     # Extract memory content from the results
-                    knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                    knowledge_content = "\n".join(
+                        [result['memory'] for result in search_results['results']])
                 else:
                     # If search_results is a list of strings, join them directly
                     knowledge_content = "\n".join(search_results)
-                
+
                 # Append found knowledge to the prompt
                 prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
 
@@ -765,18 +817,21 @@ Your Goal: {self.goal}
                     console=self.console,
                     agent_name=self.name,
                     agent_role=self.role,
-                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                    agent_tools=[t.__name__ if hasattr(t, '__name__') else str(
+                        t) for t in (tools if tools is not None else self.tools)],
                     execute_tool_fn=self.execute_tool,  # Pass tool execution function
                     reasoning_steps=reasoning_steps
                 )
 
                 self.chat_history.append({"role": "user", "content": prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
+                self.chat_history.append(
+                    {"role": "assistant", "content": response_text})
 
                 # Log completion time if in debug mode
                 if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                     total_time = time.time() - start_time
-                    logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+                    logging.debug(
+                        f"Agent.chat completed in {total_time:.2f} seconds")
 
                 return response_text
             except Exception as e:
@@ -829,44 +884,52 @@ Your Goal: {self.goal}
                         display_text = prompt
                         if isinstance(prompt, list):
                             # Extract text content from multimodal prompt
-                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                        
+                            display_text = next(
+                                (item["text"] for item in prompt if item["type"] == "text"), "")
+
                         if display_text and str(display_text).strip():
                             # Pass agent information to display_instruction
-                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                            agent_tools = [t.__name__ if hasattr(
+                                t, '__name__') else str(t) for t in self.tools]
                             display_instruction(
-                                f"Agent {self.name} is processing prompt: {display_text}", 
+                                f"Agent {self.name} is processing prompt: {display_text}",
                                 console=self.console,
                                 agent_name=self.name,
                                 agent_role=self.role,
                                 agent_tools=agent_tools
                             )
 
-                    response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps)
+                    response = self._chat_completion(
+                        messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps)
                     if not response:
                         return None
 
-                    tool_calls = getattr(response.choices[0].message, 'tool_calls', None)
+                    tool_calls = getattr(
+                        response.choices[0].message, 'tool_calls', None)
                     response_text = response.choices[0].message.content.strip()
-                    if tool_calls: ## TODO: Most likely this tool call is already called in _chat_completion, so maybe we can remove this.
+                    if tool_calls:  # TODO: Most likely this tool call is already called in _chat_completion, so maybe we can remove this.
                         messages.append({
                             "role": "assistant",
                             "content": response_text,
                             "tool_calls": tool_calls
                         })
-                        
+
                         for tool_call in tool_calls:
                             function_name = tool_call.function.name
-                            arguments = json.loads(tool_call.function.arguments)
+                            arguments = json.loads(
+                                tool_call.function.arguments)
 
                             if self.verbose:
-                                display_tool_call(f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
+                                display_tool_call(
+                                    f"Agent {self.name} is calling function '{function_name}' with arguments: {arguments}", console=self.console)
 
-                            tool_result = self.execute_tool(function_name, arguments)
+                            tool_result = self.execute_tool(
+                                function_name, arguments)
 
                             if tool_result:
                                 if self.verbose:
-                                    display_tool_call(f"Function '{function_name}' returned: {tool_result}", console=self.console)
+                                    display_tool_call(
+                                        f"Function '{function_name}' returned: {tool_result}", console=self.console)
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": tool_call.id,
@@ -878,28 +941,36 @@ Your Goal: {self.goal}
                                     "tool_call_id": tool_call.id,
                                     "content": "Function returned an empty output"
                                 })
-                            
-                        response = self._chat_completion(messages, temperature=temperature)
+
+                        response = self._chat_completion(
+                            messages, temperature=temperature)
                         if not response:
                             return None
-                        response_text = response.choices[0].message.content.strip()
+                        response_text = response.choices[0].message.content.strip(
+                        )
 
                     # Handle output_json or output_pydantic if specified
                     if output_json or output_pydantic:
                         # Add to chat history and return raw response
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        self.chat_history.append(
+                            {"role": "user", "content": original_prompt})
+                        self.chat_history.append(
+                            {"role": "assistant", "content": response_text})
                         if self.verbose:
-                            display_interaction(original_prompt, response_text, markdown=self.markdown, 
-                                             generation_time=time.time() - start_time, console=self.console)
+                            display_interaction(original_prompt, response_text, markdown=self.markdown,
+                                                generation_time=time.time() - start_time, console=self.console)
                         return response_text
 
                     if not self.self_reflect:
-                        self.chat_history.append({"role": "user", "content": original_prompt})
-                        self.chat_history.append({"role": "assistant", "content": response_text})
+                        self.chat_history.append(
+                            {"role": "user", "content": original_prompt})
+                        self.chat_history.append(
+                            {"role": "assistant", "content": response_text})
                         if self.verbose:
-                            logging.debug(f"Agent {self.name} final response: {response_text}")
-                        display_interaction(original_prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                            logging.debug(
+                                f"Agent {self.name} final response: {response_text}")
+                        display_interaction(original_prompt, response_text, markdown=self.markdown,
+                                            generation_time=time.time() - start_time, console=self.console)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content'):
                             return response.choices[0].message.reasoning_content
@@ -911,8 +982,10 @@ Identify any flaws, improvements, or actions.
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
                     """
-                    logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
-                    messages.append({"role": "user", "content": reflection_prompt})
+                    logging.debug(
+                        f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                    messages.append(
+                        {"role": "user", "content": reflection_prompt})
 
                     try:
                         reflection_response = client.beta.chat.completions.parse(
@@ -925,51 +998,68 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reflection_output = reflection_response.choices[0].message.parsed
 
                         if self.verbose:
-                            display_self_reflection(f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                            display_self_reflection(
+                                f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
 
-                        messages.append({"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
+                        messages.append(
+                            {"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"})
 
                         # Only consider satisfactory after minimum reflections
                         if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                             if self.verbose:
-                                display_self_reflection("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                display_self_reflection(
+                                    "Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                            self.chat_history.append(
+                                {"role": "user", "content": prompt})
+                            self.chat_history.append(
+                                {"role": "assistant", "content": response_text})
+                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time(
+                            ) - start_time, console=self.console)
                             return response_text
 
                         # Check if we've hit max reflections
                         if reflection_count >= self.max_reflect - 1:
                             if self.verbose:
-                                display_self_reflection("Maximum reflection count reached, returning current response", console=self.console)
-                            self.chat_history.append({"role": "user", "content": prompt})
-                            self.chat_history.append({"role": "assistant", "content": response_text})
-                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time() - start_time, console=self.console)
+                                display_self_reflection(
+                                    "Maximum reflection count reached, returning current response", console=self.console)
+                            self.chat_history.append(
+                                {"role": "user", "content": prompt})
+                            self.chat_history.append(
+                                {"role": "assistant", "content": response_text})
+                            display_interaction(prompt, response_text, markdown=self.markdown, generation_time=time.time(
+                            ) - start_time, console=self.console)
                             return response_text
 
-                        logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
-                        messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                        response = self._chat_completion(messages, temperature=temperature, tools=None, stream=True)
-                        response_text = response.choices[0].message.content.strip()
+                        logging.debug(
+                            f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                        messages.append(
+                            {"role": "user", "content": "Now regenerate your response using the reflection you made"})
+                        response = self._chat_completion(
+                            messages, temperature=temperature, tools=None, stream=True)
+                        response_text = response.choices[0].message.content.strip(
+                        )
                         reflection_count += 1
                         continue  # Continue the loop for more reflections
 
                     except Exception as e:
-                        display_error(f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                        logging.error("Reflection parsing failed.", exc_info=True)
-                        messages.append({"role": "assistant", "content": f"Self Reflection failed."})
+                        display_error(
+                            f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                        logging.error(
+                            "Reflection parsing failed.", exc_info=True)
+                        messages.append(
+                            {"role": "assistant", "content": f"Self Reflection failed."})
                         reflection_count += 1
                         continue  # Continue even after error to try again
-                    
+
                 except Exception as e:
                     display_error(f"Error in chat: {e}", console=self.console)
-                    return None 
+                    return None
 
         # Log completion time if in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
             logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
-            
+
         return response_text
 
     def clean_json_output(self, output: str) -> str:
@@ -982,10 +1072,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[len("```"):].strip()
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
-        return cleaned  
+        return cleaned
 
     async def achat(self, prompt: str, temperature=0.2, tools=None, output_json=None, output_pydantic=None, reasoning_steps=False):
-        """Async version of chat method. TODO: Requires Syncing with chat method.""" 
+        """Async version of chat method. TODO: Requires Syncing with chat method."""
         # Log all parameter values when in debug mode
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_info = {
@@ -999,17 +1089,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "agent_role": self.role,
                 "agent_goal": self.goal
             }
-            logging.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
-        
+            logging.debug(
+                f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
+
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
         try:
             # Search for existing knowledge if any knowledge is provided
             if self.knowledge:
-                search_results = self.knowledge.search(prompt, agent_id=self.agent_id)
+                search_results = self.knowledge.search(
+                    prompt, agent_id=self.agent_id)
                 if search_results:
                     if isinstance(search_results, dict) and 'results' in search_results:
-                        knowledge_content = "\n".join([result['memory'] for result in search_results['results']])
+                        knowledge_content = "\n".join(
+                            [result['memory'] for result in search_results['results']])
                     else:
                         knowledge_content = "\n".join(search_results)
                     prompt = f"{prompt}\n\nKnowledge: {knowledge_content}"
@@ -1032,23 +1125,28 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         console=self.console,
                         agent_name=self.name,
                         agent_role=self.role,
-                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools],
+                        agent_tools=[t.__name__ if hasattr(
+                            t, '__name__') else str(t) for t in self.tools],
                         execute_tool_fn=self.execute_tool_async,
                         reasoning_steps=reasoning_steps
                     )
 
-                    self.chat_history.append({"role": "user", "content": prompt})
-                    self.chat_history.append({"role": "assistant", "content": response_text})
+                    self.chat_history.append(
+                        {"role": "user", "content": prompt})
+                    self.chat_history.append(
+                        {"role": "assistant", "content": response_text})
 
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                        logging.debug(
+                            f"Agent.achat completed in {total_time:.2f} seconds")
                     return response_text
                 except Exception as e:
                     display_error(f"Error in LLM chat: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                        logging.debug(
+                            f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
 
             # For OpenAI client
@@ -1093,10 +1191,12 @@ Your Goal: {self.goal}
                     if self.verbose:
                         display_text = prompt
                         if isinstance(prompt, list):
-                            display_text = next((item["text"] for item in prompt if item["type"] == "text"), "")
-                        
+                            display_text = next(
+                                (item["text"] for item in prompt if item["type"] == "text"), "")
+
                         if display_text and str(display_text).strip():
-                            agent_tools = [t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+                            agent_tools = [t.__name__ if hasattr(
+                                t, '__name__') else str(t) for t in self.tools]
                             await adisplay_instruction(
                                 f"Agent {self.name} is processing prompt: {display_text}",
                                 console=self.console,
@@ -1118,7 +1218,8 @@ Your Goal: {self.goal}
                             elif hasattr(tool, "to_openai_tool"):
                                 formatted_tools.append(tool.to_openai_tool())
                             elif callable(tool):
-                                formatted_tools.append(self._generate_tool_definition(tool.__name__))
+                                formatted_tools.append(
+                                    self._generate_tool_definition(tool.__name__))
 
                     # Create async OpenAI client
                     async_client = AsyncOpenAI()
@@ -1134,7 +1235,8 @@ Your Goal: {self.goal}
                         result = await self._achat_completion(response, tools)
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            logging.debug(
+                                f"Agent.achat completed in {total_time:.2f} seconds")
                         return result
                     elif output_json or output_pydantic:
                         response = await async_client.chat.completions.create(
@@ -1146,7 +1248,8 @@ Your Goal: {self.goal}
                         # Return the raw response
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            logging.debug(
+                                f"Agent.achat completed in {total_time:.2f} seconds")
                         return response.choices[0].message.content
                     else:
                         response = await async_client.chat.completions.create(
@@ -1156,19 +1259,22 @@ Your Goal: {self.goal}
                         )
                         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            logging.debug(
+                                f"Agent.achat completed in {total_time:.2f} seconds")
                         return response.choices[0].message.content
                 except Exception as e:
                     display_error(f"Error in chat completion: {e}")
                     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                        logging.debug(
+                            f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     return None
         except Exception as e:
             display_error(f"Error in achat: {e}")
             if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
-                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                logging.debug(
+                    f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             return None
 
     async def _achat_completion(self, response, tools, reasoning_steps=False):
@@ -1183,13 +1289,14 @@ Your Goal: {self.goal}
                 try:
                     function_name = tool_call.function.name
                     arguments = json.loads(tool_call.function.arguments)
-                    
+
                     # Find the matching tool
-                    tool = next((t for t in tools if t.__name__ == function_name), None)
+                    tool = next(
+                        (t for t in tools if t.__name__ == function_name), None)
                     if not tool:
                         display_error(f"Tool {function_name} not found")
                         continue
-                    
+
                     # Check if the tool is async
                     if asyncio.iscoroutinefunction(tool):
                         result = await tool(**arguments)
@@ -1197,7 +1304,7 @@ Your Goal: {self.goal}
                         # Run sync function in executor to avoid blocking
                         loop = asyncio.get_event_loop()
                         result = await loop.run_in_executor(None, lambda: tool(**arguments))
-                    
+
                     results.append(result)
                 except Exception as e:
                     display_error(f"Error executing tool {function_name}: {e}")
@@ -1205,12 +1312,14 @@ Your Goal: {self.goal}
 
             # If we have results, format them into a response
             if results:
-                formatted_results = "\n".join([str(r) for r in results if r is not None])
+                formatted_results = "\n".join(
+                    [str(r) for r in results if r is not None])
                 if formatted_results:
                     messages = [
                         {"role": "system", "content": self.system_prompt},
                         {"role": "assistant", "content": "Here are the tool results:"},
-                        {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
+                        {"role": "user", "content": formatted_results +
+                            "\nPlease process these results and provide a final response."}
                     ]
                     try:
                         async_client = AsyncOpenAI()
@@ -1224,7 +1333,7 @@ Your Goal: {self.goal}
                         reasoning_content = ""
                         chunks = []
                         start_time = time.time()
-                        
+
                         with Live(
                             display_generating("", start_time),
                             console=self.console,
@@ -1237,16 +1346,18 @@ Your Goal: {self.goal}
                                 chunks.append(chunk)
                                 if chunk.choices[0].delta.content:
                                     full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_generating(full_response_text, start_time))
-                                
+                                    live.update(display_generating(
+                                        full_response_text, start_time))
+
                                 if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
                                     rc = chunk.choices[0].delta.reasoning_content
                                     if rc:
                                         reasoning_content += rc
-                                        live.update(display_generating(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                        
+                                        live.update(display_generating(
+                                            f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+
                         self.console.print()
-                        
+
                         final_response = process_stream_chunks(chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content'):
@@ -1268,23 +1379,24 @@ Your Goal: {self.goal}
 
     def run(self):
         """Alias for start() method"""
-        return self.start() 
+        return self.start()
 
     def start(self, prompt: str, **kwargs):
         """Start the agent with a prompt. This is a convenience method that wraps chat()."""
-        return self.chat(prompt, **kwargs) 
+        return self.chat(prompt, **kwargs)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any]) -> Any:
         """Async version of execute_tool"""
         try:
-            logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
+            logging.info(
+                f"Executing async tool: {function_name} with arguments: {arguments}")
             # Try to find the function in the agent's tools list first
             func = None
             for tool in self.tools:
                 if (callable(tool) and getattr(tool, '__name__', '') == function_name):
                     func = tool
                     break
-            
+
             if func is None:
                 logging.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
@@ -1294,10 +1406,11 @@ Your Goal: {self.goal}
                     logging.debug(f"Executing async function: {function_name}")
                     result = await func(**arguments)
                 else:
-                    logging.debug(f"Executing sync function in executor: {function_name}")
+                    logging.debug(
+                        f"Executing sync function in executor: {function_name}")
                     loop = asyncio.get_event_loop()
                     result = await loop.run_in_executor(None, lambda: func(**arguments))
-                
+
                 # Ensure result is JSON serializable
                 logging.debug(f"Raw result from tool: {result}")
                 if result is None:
@@ -1306,13 +1419,16 @@ Your Goal: {self.goal}
                     json.dumps(result)  # Test serialization
                     return result
                 except TypeError:
-                    logging.warning(f"Result not JSON serializable, converting to string: {result}")
+                    logging.warning(
+                        f"Result not JSON serializable, converting to string: {result}")
                     return {"result": str(result)}
 
             except Exception as e:
-                logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
+                logging.error(
+                    f"Error executing {function_name}: {str(e)}", exc_info=True)
                 return {"error": f"Error executing {function_name}: {str(e)}"}
 
         except Exception as e:
-            logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
-            return {"error": f"Error in execute_tool_async: {str(e)}"} 
+            logging.error(
+                f"Error in execute_tool_async: {str(e)}", exc_info=True)
+            return {"error": f"Error in execute_tool_async: {str(e)}"}
